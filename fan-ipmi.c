@@ -10,7 +10,7 @@
 
 // Configuration defaults
 #define CONFIG_FILE "/etc/fan-control/fan.conf"
-#define SEND_DELAY_MS 500
+#define SEND_DELAY_MS 3000
 #define RETRY_DELAY_MS 7500
 #define MAX_CURVE_POINTS 10
 #define MAX_TEMP_FILES 3
@@ -36,6 +36,10 @@ int curve_count1 = 0;
 int curve_count2 = 0;
 int curve_count3 = 0;
 int history_sec = 10;
+
+char user[20] = "ADMIN";
+char password[20] = "ADMIN";
+char address[20];
 
 // History tracking
 typedef struct {
@@ -145,7 +149,7 @@ int calculate_fan_speed(double temp, double *temps, double *pcts, int count) {
     
     if (temp <= temps[0]) return 0;
     if (temp >= temps[count-1]) {
-        return (int)(pcts[count-1] * 255);
+        return (int)(pcts[count-1] * 100);
     }
     
     for (int i = 0; i < count - 1; i++) {
@@ -154,7 +158,7 @@ int calculate_fan_speed(double temp, double *temps, double *pcts, int count) {
             double pct_range = pcts[i+1] - pcts[i];
             double slope = pct_range / temp_range;
             double pct = pcts[i] + slope * (temp - temps[i]);
-            return (int)(pct * 255);
+            return (int)(pct * 100);
         }
     }
     
@@ -225,6 +229,12 @@ void parse_config() {
                 temp_files[temp_file_idx++] = strdup(value);
             } else if (strcmp(key, "history_sec") == 0 && value) {
                 history_sec = atoi(value);
+            } else if (strcmp(key, "address") == 0 && value) {
+                snprintf(address, sizeof(address), "%s", value);
+            } else if (strcmp(key, "user") == 0 && value) {
+                snprintf(user, sizeof(user), "%s", value);
+            } else if (strcmp(key, "password") == 0 && value) {
+                snprintf(password, sizeof(password), "%s", value);
             }
         }
     }
@@ -253,12 +263,40 @@ double get_max_temp(TempHistory* hist) {
     return max;
 }
 
+int findMax(int arr[], int size) {
+    int max = arr[0];
+    for (int i = 1; i < size; i++) {
+        if (arr[i] > max) {
+            max = arr[i];
+        }
+    }
+    return max;
+}
+
 int main() {
     atexit(close_resources);
     signal(SIGINT, handle_signal);
     
     parse_config();
     open_temp_sources();
+
+    char commandBase[200];
+    char command[200];
+    snprintf(commandBase, sizeof(commandBase), "ipmitool -H %s -U %s -P %s", address, user, password);
+
+    snprintf(command, sizeof(command), "%s sensor thresh CPU_FAN2 lower 200 300 300", commandBase);
+    system(command);
+    snprintf(command, sizeof(command), "%s sensor thresh SYS_FAN1 lower 200 300 300", commandBase);
+    system(command);
+    snprintf(command, sizeof(command), "%s sensor thresh SYS_FAN2 lower 0 0 0", commandBase);
+    system(command);
+
+    snprintf(command, sizeof(command), "%s raw 0x30 0x45 0x01 0x01", commandBase);
+    system(command);
+
+    usleep(500 * 1000); // give the commands above enough time to apply before setting fan speed
+
+    int lastSetMax = 0;
 
     while (1) {
         int fan_speeds[MAX_TEMP_FILES] = {0};
@@ -286,12 +324,20 @@ int main() {
             }
         }
 
-        // ToDo: Replace!
-        // set fan speed to max value with ipmitool
-        char msg[32];
-        snprintf(msg, sizeof(msg), "%d,%d,%d\n", fan_speeds[0], fan_speeds[1], fan_speeds[2]);
-        //write(serial_fd, msg, strlen(msg));
-        printf("%s", msg);
+        char percentages[32];
+        char maxAsHex[5];
+        int max = findMax(fan_speeds, sizeof(fan_speeds) / sizeof(fan_speeds[0]));
+
+        // ToDo: This if statement does not seem to work as expected!
+        if (lastSetMax != max) {
+            lastSetMax = max;
+
+            snprintf(command, sizeof(command), "%s raw 0x30 0x70 0x66 0x01 0x00 0x%X",commandBase, max);
+            system(command);
+
+            snprintf(percentages, sizeof(percentages), "%d,%d,%d", fan_speeds[0], fan_speeds[1], fan_speeds[2]);
+            printf("Percentages: %s | Max: %d | Max as hex: 0x%X | %s\n", percentages, max, max, command);
+        }
 
         usleep(SEND_DELAY_MS * 1000);
     }
