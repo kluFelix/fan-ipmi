@@ -56,6 +56,7 @@
         description = "Fan IPMI Control Service";
         wantedBy = [ "multi-user.target" ];
         after = [ "multi-user.target" ];
+        path = with pkgs; [ ipmitool ]; # this is required to actually change the fan speed
         
         serviceConfig = {
           Type = "simple";
