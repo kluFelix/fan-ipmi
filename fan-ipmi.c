@@ -15,7 +15,7 @@
 #define SEND_DELAY_MS 500
 #define RETRY_DELAY_MS 7500
 #define MAX_CURVE_POINTS 10
-#define MAX_TEMP_FILES 3
+#define MAX_TEMP_FILES 16
 #define HISTORY_SIZE_SEC 60
 
 // source types
@@ -25,18 +25,14 @@ typedef enum {
 } SourceType;
 
 char *temp_files[MAX_TEMP_FILES] = {NULL};
-int temp_fds[MAX_TEMP_FILES] = {-1, -1, -1};
+int temp_fds[MAX_TEMP_FILES] = {-1};
 nvmlDevice_t gpu_devices[MAX_TEMP_FILES] = {0};
-SourceType source_types[MAX_TEMP_FILES] = {SOURCE_FILE}; // Track source type
-double curve_temps1[MAX_CURVE_POINTS];
-double curve_pcts1[MAX_CURVE_POINTS];
-double curve_temps2[MAX_CURVE_POINTS];
-double curve_pcts2[MAX_CURVE_POINTS];
-double curve_temps3[MAX_CURVE_POINTS];
-double curve_pcts3[MAX_CURVE_POINTS];
-int curve_count1 = 0;
-int curve_count2 = 0;
-int curve_count3 = 0;
+SourceType source_types[MAX_TEMP_FILES] = {SOURCE_FILE};
+int curve_ids[MAX_TEMP_FILES] = {0};
+double curve_temps[MAX_TEMP_FILES][MAX_CURVE_POINTS];
+double curve_pcts[MAX_TEMP_FILES][MAX_CURVE_POINTS];
+int curve_counts[MAX_TEMP_FILES] = {0};
+int num_sensors = 0;
 int history_sec = 10;
 
 char user[20] = "ADMIN";
@@ -55,7 +51,7 @@ TempHistory histories[MAX_TEMP_FILES];
 
 // Cleanup resources
 void close_resources(void) {
-    for (int i = 0; i < MAX_TEMP_FILES; i++) {
+    for (int i = 0; i < num_sensors; i++) {
         if (temp_fds[i] != -1) {
             close(temp_fds[i]);
             temp_fds[i] = -1;
@@ -112,7 +108,7 @@ void open_temp_sources() {
     }
 
     // Process each configured source
-    for (int i = 0; i < MAX_TEMP_FILES; i++) {
+    for (int i = 0; i < num_sensors; i++) {
         if (!temp_files[i]) continue;
 
         // Check if this is a GPU source (format: gpu:0)
@@ -187,49 +183,45 @@ void parse_config() {
         if (!key) continue;
         char* value = strtok(NULL, " \t\r\n");
 
+        // Handle sensorX_curve_id mapping
+        if (strncmp(key, "sensor", 6) == 0) {
+            char* underscore = strchr(key, '_');
+            if (underscore && strncmp(underscore, "_curve_id", 9) == 0) {
+                int sensor_idx = atoi(key + 6);
+                if (sensor_idx >= 1 && sensor_idx <= MAX_TEMP_FILES && value) {
+                    curve_ids[sensor_idx - 1] = atoi(value);
+                }
+                continue;
+            }
+        }
+
         // Handle curve sections
-        if (strcmp(key, "curve1") == 0) {
-            current_curve = 1;
-            continue;
-        } else if (strcmp(key, "curve2") == 0) {
-            current_curve = 2;
-            continue;
-        } else if (strcmp(key, "curve3") == 0) {
-            current_curve = 3;
+        if (strncmp(key, "curve", 5) == 0) {
+            int curve_idx = atoi(key + 5);
+            if (curve_idx >= 1 && curve_idx <= MAX_TEMP_FILES) {
+                current_curve = curve_idx;
+            }
             continue;
         }
 
-        if (current_curve == 1 && value) {
+        if (current_curve > 0 && current_curve <= MAX_TEMP_FILES && value) {
             double temp = strtod(key, NULL);
             double pct = strtod(value, NULL);
-            if (curve_count1 < MAX_CURVE_POINTS) {
-                curve_temps1[curve_count1] = temp;
-                curve_pcts1[curve_count1] = pct;
-                curve_count1++;
-            }
-        } else if (current_curve == 2 && value) {
-            double temp = strtod(key, NULL);
-            double pct = strtod(value, NULL);
-            if (curve_count2 < MAX_CURVE_POINTS) {
-                curve_temps2[curve_count2] = temp;
-                curve_pcts2[curve_count2] = pct;
-                curve_count2++;
-            }
-        } else if (current_curve == 3 && value) {
-            double temp = strtod(key, NULL);
-            double pct = strtod(value, NULL);
-            if (curve_count3 < MAX_CURVE_POINTS) {
-                curve_temps3[curve_count3] = temp;
-                curve_pcts3[curve_count3] = pct;
-                curve_count3++;
+            if (curve_counts[current_curve] < MAX_CURVE_POINTS) {
+                curve_temps[current_curve][curve_counts[current_curve]] = temp;
+                curve_pcts[current_curve][curve_counts[current_curve]] = pct;
+                curve_counts[current_curve]++;
             }
         } else {
-            if (strcmp(key, "temp_file1") == 0 && value && temp_file_idx < MAX_TEMP_FILES) {
-                temp_files[temp_file_idx++] = strdup(value);
-            } else if (strcmp(key, "temp_file2") == 0 && value && temp_file_idx < MAX_TEMP_FILES) {
-                temp_files[temp_file_idx++] = strdup(value);
-            } else if (strcmp(key, "temp_file3") == 0 && value && temp_file_idx < MAX_TEMP_FILES) {
-                temp_files[temp_file_idx++] = strdup(value);
+            // Handle temp_fileX
+            if (strncmp(key, "temp_file", 9) == 0) {
+                int sensor_idx = atoi(key + 9);
+                if (sensor_idx >= 1 && sensor_idx <= MAX_TEMP_FILES && value && temp_file_idx < MAX_TEMP_FILES) {
+                    temp_files[temp_file_idx++] = strdup(value);
+                    if (sensor_idx > num_sensors) {
+                        num_sensors = sensor_idx;
+                    }
+                }
             } else if (strcmp(key, "history_sec") == 0 && value) {
                 history_sec = atoi(value);
             } else if (strcmp(key, "address") == 0 && value) {
@@ -243,11 +235,20 @@ void parse_config() {
     }
     fclose(conf);
 
+    if (num_sensors == 0) {
+        fprintf(stderr, "Error: No sensors configured\n");
+        exit(EXIT_FAILURE);
+    }
+
     int history_size = (history_sec * 1000 + SEND_DELAY_MS - 1) / SEND_DELAY_MS;
-    for (int i = 0; i < MAX_TEMP_FILES; i++) {
+    for (int i = 0; i < num_sensors; i++) {
         histories[i].size = history_size;
         histories[i].index = 0;
         histories[i].temps = calloc(history_size, sizeof(double));
+        if (!histories[i].temps) {
+            fprintf(stderr, "Error: Failed to allocate memory for history\n");
+            exit(EXIT_FAILURE);
+        }
     }
 }
 
@@ -315,7 +316,7 @@ int main() {
     while (1) {
         int fan_speeds[MAX_TEMP_FILES] = {0};
 
-        for (int i = 0; i < MAX_TEMP_FILES; i++) {
+        for (int i = 0; i < num_sensors; i++) {
             if (!temp_files[i]) continue;  // Skip empty sources
 
             // Read temperature using index (handles both GPU and file)
@@ -324,23 +325,14 @@ int main() {
                 update_history(&histories[i], temp);
                 double max_temp = get_max_temp(&histories[i]);
 
-                switch (i) {
-                    case 0:
-                        fan_speeds[i] = calculate_fan_speed(max_temp, curve_temps1, curve_pcts1, curve_count1);
-                        break;
-                    case 1:
-                        fan_speeds[i] = calculate_fan_speed(max_temp, curve_temps2, curve_pcts2, curve_count2);
-                        break;
-                    case 2:
-                        fan_speeds[i] = calculate_fan_speed(max_temp, curve_temps3, curve_pcts3, curve_count3);
-                        break;
-                }
+                int curve_id = curve_ids[i];
+                fan_speeds[i] = calculate_fan_speed(max_temp, curve_temps[curve_id], curve_pcts[curve_id], curve_counts[curve_id]);
             }
         }
 
         char percentages[32];
         char maxAsHex[5];
-        int max = findMax(fan_speeds, sizeof(fan_speeds) / sizeof(fan_speeds[0]));
+        int max = findMax(fan_speeds, num_sensors);
 
         if (lastSetMax != max) {
             lastSetMax = max;
