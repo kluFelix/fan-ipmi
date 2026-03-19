@@ -303,9 +303,10 @@ int main() {
 
     snprintf(commandBase, sizeof(commandBase), "ipmitool -H %s -U %s -P %s", address, user, password);
 
-    runCommand("sensor thresh CPU_FAN2 lower 200 300 300");
-    runCommand("sensor thresh SYS_FAN1 lower 200 300 300");
-    runCommand("sensor thresh SYS_FAN2 lower 100 200 200");
+    runCommand("sensor thresh CPU_FAN2 lower 50 100 100");
+    runCommand("sensor thresh SYS_FAN1 lower 50 100 100");
+    runCommand("sensor thresh SYS_FAN2 lower 50 100 100");
+    runCommand("sensor thresh SYS_FAN3 lower 50 100 100");
 
     runCommand("raw 0x30 0x45 0x01 0x01");
 
