@@ -99,6 +99,9 @@ void close_resources(void) {
 void handle_signal(int sig) {
     (void)sig;
     
+    printf("Signal received, setting fans to 100%% for safety\n");
+    fflush(stdout);
+    
     // Set all fans to 100% before exiting for safety
     char command[256];
     snprintf(command, sizeof(command), "%s raw 0x30 0x70 0x66 0x01 0x00 0xFF", commandBase);
@@ -472,6 +475,7 @@ void open_temp_sources() {
     for (int c = 0; c < num_curves; c++) {
         Curve *curve = &curves[c];
         printf("Curve '%s' (%d sources):\n", curve->name, curve->num_sources);
+        fflush(stdout);
 
         for (int s = 0; s < curve->num_sources; s++) {
             SourceData *src = &source_data[source_idx];
@@ -492,6 +496,7 @@ void open_temp_sources() {
                 char name[NVML_DEVICE_NAME_BUFFER_SIZE];
                 nvmlDeviceGetName(src->device, name, sizeof(name));
                 printf("  Source %d: GPU %d - %s\n", source_idx, gpu_index, name);
+                fflush(stdout);
 
             } else {
                 // File source
@@ -503,6 +508,7 @@ void open_temp_sources() {
                     exit(EXIT_FAILURE);
                 }
                 printf("  Source %d: File - %s\n", source_idx, curve->sources[s]);
+                fflush(stdout);
             }
 
             source_idx++;
@@ -570,6 +576,7 @@ int main() {
             FanThreshold *ft = &fan_thresholds[i];
             printf("Setting threshold for %s: lower [%d, %d, %d]\n", 
                    ft->fan_name, ft->lower_min, ft->lower_warn, ft->lower_crit);
+            fflush(stdout);
             
             runCommand("sensor thresh %s lower %d %d %d",
                        ft->fan_name, ft->lower_min, ft->lower_warn, ft->lower_crit);
@@ -577,12 +584,14 @@ int main() {
             if (ft->has_upper) {
                 printf("Setting threshold for %s: upper [%d, %d, %d]\n", 
                        ft->fan_name, ft->upper_min, ft->upper_warn, ft->upper_crit);
+                fflush(stdout);
                 runCommand("sensor thresh %s upper %d %d %d",
                            ft->fan_name, ft->upper_min, ft->upper_warn, ft->upper_crit);
             }
         }
     } else {
         printf("No fan thresholds configured, skipping threshold setup\n");
+        fflush(stdout);
     }
 
     // Enable fan control
@@ -633,6 +642,8 @@ int main() {
 
         if (lastSetMax != max) {
             lastSetMax = max;
+            printf("Setting fan speed to %d%%\n", max);
+            fflush(stdout);
             runCommand("raw 0x30 0x70 0x66 0x01 0x00 0x%X", max);
         }
 
