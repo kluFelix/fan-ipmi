@@ -1,90 +1,60 @@
-## Nix Integration Guide
+## IPMI Fan Control
 
-**Written by Devstral 24b!**
+### Configuration
 
-### Overview
-
-This project is now fully integrated with Nix/NixOS. You can:
-1. Build the package using `nix build`
-2. Use it as a development environment with `nix develop`
-3. Install it as a system service in NixOS
-
-### Usage
-
-### Building the Package
-
-```bash
-# Build the package
-nix build .#fan-ipmi
-
-# Run the binary (note: needs config file at /etc/fan-control/fan.conf)
-./result/bin/fan-ipmi
-```
-
-#### Development Environment
-
-```bash
-# Enter development shell with all dependencies
-nix develop
-```
-
-#### Using in NixOS Configuration
-
-Add this to your `configuration.nix`:
-
-```nix
-{ config, pkgs, ... }:
-  {
-    imports = [ 
-      inputs.fan-ipmi.nixosModules.default
-    ];
-    
-    # Enable the fan-ipmi service
-    systemd.services.fan-ipmi.enable = true;
-  }
-```
-
-Or use it directly from your flake:
-
-```nix
-{
-  inputs.fan-ipmi.url = "git+file:/path/to/fan-ipmi";
-  
-  outputs = { self, nixpkgs, fan-ipmi, ... } @ inputs: {
-    nixosConfigurations.your-hostname = nixpkgs.lib.nixosSystem {
-      system = "x86_64-linux";
-      modules = [
-        ./configuration.nix
-        fan-ipmi.nixosModules.default
-      ];
-    };
-  };
-}
-```
-
-### Configuration File
-
-The configuration file is located at `/etc/fan-control/fan.conf` when installed.
+The configuration file needs to be at `/etc/fan-ipmi/fan.toml`.
 A sample configuration is included in the repository.
 
-### Package Outputs
+**Structure**
+- `[[curves]]` - Array of curve tables (use `[[curves]]` for multiple curves)
+- `curves.name` - Optional curve identifier (used for logging)
+- `curves.sources` - Array of sensor identifiers to monitor for this curve
+- `curves.profile` - Array of profile points, each with:
+  - `temp` - Temperature threshold in Celsius
+  - `pct` - Fan percentage (0.0 to 1.0) at that temperature
 
-- `.#fan-ipmi` - The main package
-- `.#packages.x86_64-linux.default` - Alias to fan-ipmi
-- `.#nixosModules.default` - NixOS module for the service
-- `.#devShells.x86_64-linux.default` - Development shell
+**Example**
+```toml
+# IPMI connection settings
+address = "123.123.123.123"
+user = "ADMIN"
+password = "ADMIN"
+
+# History window in seconds (how far back to look for max temperature)
+history_sec = 30
+
+[[curves]]
+name = "gpu"
+sources = ["gpu:0", "gpu:1"]
+profile = [
+    { temp = 25, pct = 0.0 },
+    { temp = 55, pct = 0.5 },
+    { temp = 85, pct = 1.0 }
+]
+
+[[curves]]
+name = "cpu"
+sources = ["/sys/class/thermal/thermal_zone0/temp"]
+profile = [
+    { temp = 30, pct = 0.0 },
+    { temp = 40, pct = 0.3 },
+    { temp = 50, pct = 0.5 },
+    { temp = 60, pct = 0.7 },
+    { temp = 70, pct = 1.0 }
+]
+```
 
 ### Dependencies
 
 The package includes:
-- ipmitool (for IPMI commands)
-- NVIDIA NVML (for GPU temperature monitoring)
-- GCC (for compilation)
+- [ipmitool](https://github.com/ipmitool/ipmitool)
+- [tomlc17](https://github.com/cktan/tomlc17)
+- NVIDIA NVML
 
-### Service Configuration
+### Disclaimer
 
-The systemd service is configured with:
-- Automatic restart on failure
-- Runs as root
-- Starts at boot (multi-user.target)
+Assited by:
+- Qwen3.5 35B
+- Devstral 24B
+- Kimi K2
 
