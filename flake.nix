@@ -40,14 +40,14 @@
           if prev == "" then "" else ":${prev}");
       
       buildPhase = ''
-        gcc -o fan-ipmi fan-ipmi.c -lnvidia-ml -lm
+        gcc -o fan-ipmi fan-ipmi.c tomlc17.c -lnvidia-ml -lm
       '';
       
       installPhase = ''
         mkdir -p $out/bin
         cp fan-ipmi $out/bin/
-        mkdir -p $out/etc/fan-control
-        cp ${./fan.conf} $out/etc/fan-control/fan.conf
+        mkdir -p $out/etc/fan-ipmi
+        cp ${./fan.toml} $out/etc/fan-ipmi/fan.toml
       '';
     };
 

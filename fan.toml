@@ -1,0 +1,68 @@
+# Fan IPMI Control Configuration
+# TOML format with nested curve structure
+
+# IPMI connection settings
+address = "123.123.123.123"
+user = "ADMIN"
+password = "ADMIN"
+
+# History window in seconds (how far back to look for max temperature)
+history_sec = 30
+
+# Curves as the main grouping
+# Each curve can have multiple temperature sources that share the same profile
+[[curves]]
+name = "cpu"
+sources = [
+    "/sys/class/hwmon/hwmon5/temp1_input",
+]
+profile = [
+    { temp = 25, pct = 0.0 },
+    { temp = 30, pct = 0.2 },
+    { temp = 40, pct = 0.4 },
+    { temp = 50, pct = 0.6 },
+    { temp = 60, pct = 0.8 },
+    { temp = 70, pct = 1.0 }
+]
+
+[[curves]]
+name = "amd gpu 1"
+sources = [
+    "/sys/class/hwmon/hwmon1/temp3_input"
+]
+profile = [
+    { temp = 25, pct = 0.0 },
+    { temp = 30, pct = 0.2 },
+    { temp = 40, pct = 0.4 },
+    { temp = 50, pct = 0.6 },
+    { temp = 60, pct = 0.8 },
+    { temp = 70, pct = 1.0 }
+]
+
+[[curves]]
+name = "amd gpu 2"
+sources = [
+    "/sys/class/hwmon/hwmon0/temp2_input"
+]
+profile = [
+    { temp = 25, pct = 0.0 },
+    { temp = 30, pct = 0.2 },
+    { temp = 40, pct = 0.4 },
+    { temp = 50, pct = 0.6 },
+    { temp = 60, pct = 0.8 },
+    { temp = 70, pct = 1.0 }
+]
+
+[[curves]]
+name = "nvidia gpus"
+sources = [
+    "gpu:0"
+    "gpu:1"
+]
+profile = [
+    { temp = 25, pct = 0.0 },
+    { temp = 35, pct = 0.3 },
+    { temp = 50, pct = 0.6 },
+    { temp = 65, pct = 1.0 }
+]
+
