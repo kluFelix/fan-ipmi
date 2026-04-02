@@ -1,107 +1,128 @@
-{  
-  description = "A basic flake for c development";
-  inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-25.11";
-  
-  outputs = { self, nixpkgs, ... }: let
-    system = "x86_64-linux";
-    pkgs = import nixpkgs {
-      inherit system;
-      config.allowUnfree = true;
-    };
+{
+  description = "IPMI Fan Control";
 
-    # NVIDIA driver providing libnvidia-ml.so
-    nvidiaDriver = pkgs.linuxPackages_latest.nvidia_x11;
+  inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
 
-    fanIpmiPackage = pkgs.stdenv.mkDerivation {
-      pname = "fan-ipmi";
-      version = "1.0";
-      src = ./.;
-      
-      nativeBuildInputs = with pkgs; [
-        gcc
-        pkg-config
-      ];
-      
-      buildInputs = with pkgs; [
-        ipmitool
-        cudaPackages.cuda_nvml_dev
-        nvidiaDriver
-      ];
-      
-      # Tell the linker where to find libnvidia-ml.so
-      NIX_LDFLAGS = pkgs.lib.concatStringsSep " " [
-        "-L${pkgs.cudaPackages.cuda_nvml_dev}/lib"
-        "-L${nvidiaDriver}/lib"
-      ];
-      
-      # Optional but helpful so the binary finds the library at runtime
-      LD_LIBRARY_PATH = "${nvidiaDriver}/lib"
-        + (let prev = builtins.getEnv "LD_LIBRARY_PATH"; in
-          if prev == "" then "" else ":${prev}");
-      
-      buildPhase = ''
-        gcc -o fan-ipmi fan-ipmi.c tomlc17.c -lnvidia-ml -lm
-      '';
-      
-      installPhase = ''
-        mkdir -p $out/bin
-        cp fan-ipmi $out/bin/
-        mkdir -p $out/etc/fan-ipmi
-        cp ${./fan.toml} $out/etc/fan-ipmi/fan.toml
-      '';
-    };
-
-    fanIpmiService = { config, lib, pkgs, ... }: {
-      systemd.services.fan-ipmi = {
-        description = "Fan IPMI Control Service";
-        wantedBy = [ "multi-user.target" ];
-        after = [ "multi-user.target" ];
-        path = with pkgs; [ ipmitool ]; # this is required to actually change the fan speed
-        
-        serviceConfig = {
-          Type = "simple";
-          Restart = "on-failure";
-          ExecStart = "${fanIpmiPackage}/bin/fan-ipmi";
-          User = "root";
-          Group = "root";
-        };
+  outputs = { self, nixpkgs }:
+    let
+      system = "x86_64-linux";
+      pkgs = import nixpkgs {
+        inherit system;
+        config.allowUnfree = true;
       };
-    };
+    in {
+      packages.${system}.default = pkgs.stdenv.mkDerivation {
+        pname = "fan-ipmi";
+        version = "0.1.0";
+        src = ./.;
+        nativeBuildInputs = with pkgs; [ gcc pkg-config patchelf makeWrapper ];
 
-  in {
-    packages.${system} = {
-      default = fanIpmiPackage;
-      fan-ipmi = fanIpmiPackage;
-    };
+        buildInputs = with pkgs; [ 
+          linuxPackages.nvidia_x11
+          cudaPackages.cuda_nvml_dev
+        ];
 
-    nixosModules.default = fanIpmiService;
+        buildCommand = ''
+          mkdir -p $out/bin
+          gcc -o $out/bin/fan-ipmi $src/fan-ipmi.c $src/tomlc17.c \
+            -I${pkgs.linuxPackages.nvidia_x11}/include \
+            -L${pkgs.linuxPackages.nvidia_x11}/lib \
+            -lnvidia-ml -lm
 
-    devShells."${system}".default = pkgs.mkShell {
+          # Runtime link only against system driver
+          patchelf --set-rpath '/run/opengl-driver/lib' $out/bin/fan-ipmi
+
+          # Ensure wrapper sets library path
+          wrapProgram $out/bin/fan-ipmi \
+            --prefix LD_LIBRARY_PATH : /run/opengl-driver/lib
+        '';
+      };
+
+      apps.${system}.default = {
+        type = "app";
+        program = "${self.packages.${system}.default}/bin/fan-ipmi";
+      };
+
+      devShells.${system}.default = pkgs.mkShell {
         buildInputs = with pkgs; [
           cudaPackages.cuda_nvml_dev
+          linuxPackages.nvidia_x11
         ];
 
         nativeBuildInputs = with pkgs; [
           gcc
           clang
-          clang-tools # for LSP support
+          clang-tools
           gdb
-
-          cudaPackages.cuda_nvml_dev
-          nvidiaDriver
         ];
 
-        # Tell the linker where to find libnvidia-ml.so
-        NIX_LDFLAGS = pkgs.lib.concatStringsSep " " [
-          "-L${pkgs.cudaPackages.cuda_nvml_dev}/lib"
-          "-L${nvidiaDriver}/lib"
-        ];
-
-        # Optional but helpful so the binary finds the library at runtime
-        LD_LIBRARY_PATH = "${nvidiaDriver}/lib"
-          + (let prev = builtins.getEnv "LD_LIBRARY_PATH"; in
-            if prev == "" then "" else ":${prev}");
+        NIX_LDFLAGS = "-L${pkgs.linuxPackages.nvidia_x11}/lib";
       };
-  };
-}
 
+      nixosModules.fan-ipmi = { config, lib, pkgs, ... }: let
+        cfg = config.services.fan-ipmi;
+        fanIpmiPackage = self.packages.${system}.default;
+      in {
+        options.services.fan-ipmi = {
+          enable = lib.mkEnableOption "fan-ipmi";
+
+          address = lib.mkOption {
+            type = lib.types.str;
+            description = "IPMI address";
+          };
+
+          user = lib.mkOption {
+            type = lib.types.str;
+            default = "ADMIN";
+            description = "IPMI user";
+          };
+
+          password = lib.mkOption {
+            type = lib.types.str;
+            default = "ADMIN";
+            description = "IPMI password";
+          };
+
+          historySec = lib.mkOption {
+            type = lib.types.int;
+            default = 30;
+            description = "Temperature history window in seconds";
+          };
+
+          configPath = lib.mkOption {
+            type = lib.types.path;
+            default = /etc/fan-ipmi/fan.toml;
+            description = "Path to configuration file";
+          };
+        };
+
+        config = lib.mkIf cfg.enable {
+          systemd.services.fan-ipmi = {
+            description = "IPMI Fan Control Service";
+            wantedBy = [ "multi-user.target" ];
+            after = [ "multi-user.target" ];
+            path = with pkgs; [ ipmitool ];
+
+            serviceConfig = {
+              Type = "simple";
+              ExecStart = "${fanIpmiPackage}/bin/fan-ipmi";
+              Restart = "on-failure";
+              User = "root";
+              Group = "root";
+
+              DynamicUser = true;
+              NoNewPrivileges = true;
+              ProtectSystem = "strict";
+              PrivateTmp = true;
+              ProtectKernelTunables = true;
+              ProtectKernelModules = true;
+              ProtectControlGroups = true;
+              MemoryDenyWriteExecute = true;
+            };
+          };
+
+          environment.etc."fan-ipmi/fan.toml".source = cfg.configPath;
+        };
+      };
+    };
+}
