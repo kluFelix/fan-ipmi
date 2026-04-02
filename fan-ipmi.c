@@ -98,6 +98,12 @@ void close_resources(void) {
 // Signal handler
 void handle_signal(int sig) {
     (void)sig;
+    
+    // Set all fans to 100% before exiting for safety
+    char command[256];
+    snprintf(command, sizeof(command), "%s raw 0x30 0x70 0x66 0x01 0x00 0xFF", commandBase);
+    system(command);
+    
     exit(0);
 }
 
