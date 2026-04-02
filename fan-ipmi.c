@@ -44,10 +44,21 @@ typedef struct {
     int profile_count;
 } Curve;
 
+// Fan threshold structure
+typedef struct {
+    char fan_name[32];
+    int lower_min, lower_warn, lower_crit;
+    int upper_min, upper_warn, upper_crit;
+    bool has_upper;
+} FanThreshold;
+
 // Global data
 Curve curves[MAX_CURVES];
 int num_curves = 0;
 int history_sec = 10;
+
+FanThreshold fan_thresholds[MAX_CURVES];
+int num_fan_thresholds = 0;
 
 char user[20] = "ADMIN";
 char password[20] = "ADMIN";
@@ -363,6 +374,56 @@ void parse_config() {
         num_curves++;
     }
 
+    // Parse fan_thresholds array
+    toml_datum_t thresholds_array = toml_get(conf_table, "fan_thresholds");
+    if (thresholds_array.type == TOML_ARRAY && thresholds_array.u.arr.size > 0) {
+        if (thresholds_array.u.arr.size > MAX_CURVES) {
+            fprintf(stderr, "Error: Too many fan thresholds configured\n");
+            toml_free(result);
+            exit(EXIT_FAILURE);
+        }
+
+        for (int i = 0; i < thresholds_array.u.arr.size; i++) {
+            toml_datum_t tbl = thresholds_array.u.arr.elem[i];
+            FanThreshold *ft = &fan_thresholds[num_fan_thresholds];
+            
+            // Parse fan name
+            toml_datum_t fan_val = toml_get(tbl, "fan");
+            const char *fan_str = get_string(fan_val);
+            if (!fan_str) {
+                fprintf(stderr, "Error: 'fan' field required in threshold %d\n", i);
+                toml_free(result);
+                exit(EXIT_FAILURE);
+            }
+            strncpy(ft->fan_name, fan_str, sizeof(ft->fan_name) - 1);
+            ft->fan_name[sizeof(ft->fan_name) - 1] = '\0';
+            
+            // Parse lower array [min, warn, crit]
+            toml_datum_t lower_arr = toml_get(tbl, "lower");
+            if (lower_arr.type != TOML_ARRAY || lower_arr.u.arr.size != 3) {
+                fprintf(stderr, "Error: 'lower' must be array of 3 values\n");
+                toml_free(result);
+                exit(EXIT_FAILURE);
+            }
+            ft->lower_min = (int)get_int64(lower_arr.u.arr.elem[0]);
+            ft->lower_warn = (int)get_int64(lower_arr.u.arr.elem[1]);
+            ft->lower_crit = (int)get_int64(lower_arr.u.arr.elem[2]);
+            
+            // Parse upper array (optional)
+            toml_datum_t upper_arr = toml_get(tbl, "upper");
+            if (upper_arr.type == TOML_ARRAY && upper_arr.u.arr.size == 3) {
+                ft->upper_min = (int)get_int64(upper_arr.u.arr.elem[0]);
+                ft->upper_warn = (int)get_int64(upper_arr.u.arr.elem[1]);
+                ft->upper_crit = (int)get_int64(upper_arr.u.arr.elem[2]);
+                ft->has_upper = true;
+            } else {
+                ft->has_upper = false;
+            }
+            
+            num_fan_thresholds++;
+        }
+    }
+
     toml_free(result);
 
     if (num_curves == 0) {
@@ -497,11 +558,26 @@ int main() {
 
     snprintf(commandBase, sizeof(commandBase), "ipmitool -H %s -U %s -P %s", address, user, password);
 
-    // Configure fan thresholds
-    runCommand("sensor thresh CPU_FAN2 lower 0 0 100");
-    runCommand("sensor thresh SYS_FAN1 lower 0 0 100");
-    runCommand("sensor thresh SYS_FAN2 lower 0 0 100");
-    runCommand("sensor thresh SYS_FAN3 lower 0 0 100");
+    // Apply fan thresholds if configured
+    if (num_fan_thresholds > 0) {
+        for (int i = 0; i < num_fan_thresholds; i++) {
+            FanThreshold *ft = &fan_thresholds[i];
+            printf("Setting threshold for %s: lower [%d, %d, %d]\n", 
+                   ft->fan_name, ft->lower_min, ft->lower_warn, ft->lower_crit);
+            
+            runCommand("sensor thresh %s lower %d %d %d",
+                       ft->fan_name, ft->lower_min, ft->lower_warn, ft->lower_crit);
+            
+            if (ft->has_upper) {
+                printf("Setting threshold for %s: upper [%d, %d, %d]\n", 
+                       ft->fan_name, ft->upper_min, ft->upper_warn, ft->upper_crit);
+                runCommand("sensor thresh %s upper %d %d %d",
+                           ft->fan_name, ft->upper_min, ft->upper_warn, ft->upper_crit);
+            }
+        }
+    } else {
+        printf("No fan thresholds configured, skipping threshold setup\n");
+    }
 
     // Enable fan control
     runCommand("raw 0x30 0x45 0x01 0x01");

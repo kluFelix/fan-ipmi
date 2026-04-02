@@ -9,6 +9,26 @@ password = "ADMIN"
 # History window in seconds (how far back to look for max temperature)
 history_sec = 30
 
+# Fan threshold configuration (optional)
+# Sets warning/critical limits for each fan sensor
+# lower = [min_rpm, warning_rpm, critical_rpm]
+# upper = [min_rpm, warning_rpm, critical_rpm] (optional)
+[[fan_thresholds]]
+fan = "CPU_FAN2"
+lower = [0, 0, 100]
+
+[[fan_thresholds]]
+fan = "SYS_FAN1"
+lower = [0, 0, 100]
+
+[[fan_thresholds]]
+fan = "SYS_FAN2"
+lower = [0, 0, 100]
+
+[[fan_thresholds]]
+fan = "SYS_FAN3"
+lower = [0, 0, 100]
+
 # Curves as the main grouping
 # Each curve can have multiple temperature sources that share the same profile
 [[curves]]
