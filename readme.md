@@ -53,7 +53,7 @@ The package includes:
 
 ### Disclaimer
 
-Assited by:
+Assisted by:
 - Qwen3.5 35B
 - Devstral 24B
 - Kimi K2
