@@ -600,7 +600,8 @@ int main() {
 
     usleep(5000 * 1000); // give the commands above enough time to apply before setting fan speed
 
-    int lastSetMax = 0;
+    int lastTarget = -1;
+    int lastActual = 0;
 
     while (1) {
         int fan_speeds[MAX_CURVES] = {0};
@@ -641,10 +642,18 @@ int main() {
         }
 
         // Find maximum fan speed across all curves
-        int max = findMax(fan_speeds, num_curves);
+        int target = findMax(fan_speeds, num_curves);
 
-        if (lastSetMax != max) {
-            lastSetMax = max;
+        // Asymmetric ramp: instant spin-up, gradual spin-down (1% per step)
+        int actual = target;
+        if (target < lastActual) {
+            actual = lastActual - 1;
+            if (actual < target) actual = target;
+        }
+
+        // Log when target changes
+        if (target != lastTarget) {
+            lastTarget = target;
 
             char logbuf[1024] = {0};
             int offset = 0;
@@ -653,10 +662,18 @@ int main() {
                 if (offset > 0) offset += snprintf(logbuf + offset, sizeof(logbuf) - offset, " | ");
                 offset += snprintf(logbuf + offset, sizeof(logbuf) - offset, "%s: %3d", curves[c].name, (int)max_temps[c]);
             }
-            offset += snprintf(logbuf + offset, sizeof(logbuf) - offset, " | fan: %d%%", max);
+            if (target == actual)
+                offset += snprintf(logbuf + offset, sizeof(logbuf) - offset, " | fan: %d%%", target);
+            else
+                offset += snprintf(logbuf + offset, sizeof(logbuf) - offset, " | fan: %d%% -> %d%%", lastActual, target);
             printf("%s\n", logbuf);
             fflush(stdout);
-            runCommand("raw 0x30 0x70 0x66 0x01 0x00 0x%X", max);
+        }
+
+        // Apply to hardware when actual speed changes
+        if (actual != lastActual) {
+            lastActual = actual;
+            runCommand("raw 0x30 0x70 0x66 0x01 0x00 0x%X", actual);
         }
 
         usleep(SEND_DELAY_MS * 1000);
