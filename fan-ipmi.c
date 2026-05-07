@@ -564,6 +564,7 @@ void runCommand(const char *format, ...) {
 int main() {
     atexit(close_resources);
     signal(SIGINT, handle_signal);
+    signal(SIGTERM, handle_signal);
 
     parse_config();
     open_temp_sources();
