@@ -604,6 +604,7 @@ int main() {
 
     while (1) {
         int fan_speeds[MAX_CURVES] = {0};
+        double max_temps[MAX_CURVES] = {0};
 
         // Process each curve
         for (int c = 0; c < num_curves; c++) {
@@ -630,10 +631,11 @@ int main() {
                 }
             }
 
-            // Calculate fan speed using curve's profile
+            max_temps[c] = max_temp;
+
             if (!isnan(max_temp) && max_temp > -INFINITY) {
-                fan_speeds[c] = calculate_fan_speed(max_temp, 
-                    curve->profile, 
+                fan_speeds[c] = calculate_fan_speed(max_temp,
+                    curve->profile,
                     curve->profile_count);
             }
         }
@@ -643,7 +645,16 @@ int main() {
 
         if (lastSetMax != max) {
             lastSetMax = max;
-            printf("Setting fan speed to %d%%\n", max);
+
+            char logbuf[1024] = {0};
+            int offset = 0;
+            for (int c = 0; c < num_curves; c++) {
+                if (max_temps[c] <= -INFINITY) continue;
+                if (offset > 0) offset += snprintf(logbuf + offset, sizeof(logbuf) - offset, " | ");
+                offset += snprintf(logbuf + offset, sizeof(logbuf) - offset, "%s: %3d", curves[c].name, (int)max_temps[c]);
+            }
+            offset += snprintf(logbuf + offset, sizeof(logbuf) - offset, " | fan: %d%%", max);
+            printf("%s\n", logbuf);
             fflush(stdout);
             runCommand("raw 0x30 0x70 0x66 0x01 0x00 0x%X", max);
         }
