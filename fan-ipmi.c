@@ -106,6 +106,8 @@ void handle_signal(int sig) {
     char command[256];
     snprintf(command, sizeof(command), "%s raw 0x30 0x70 0x66 0x01 0x00 0xFF", commandBase);
     system(command);
+    snprintf(command, sizeof(command), "%s raw 0x30 0x70 0x66 0x01 0x01 0xFF", commandBase);
+    system(command);
     
     exit(0);
 }
@@ -671,9 +673,11 @@ int main() {
         }
 
         // Apply to hardware when actual speed changes
+        // Note: both zones get same speed; could be split per-zone for individual control
         if (actual != lastActual) {
             lastActual = actual;
             runCommand("raw 0x30 0x70 0x66 0x01 0x00 0x%X", actual);
+            runCommand("raw 0x30 0x70 0x66 0x01 0x01 0x%X", actual);
         }
 
         usleep(SEND_DELAY_MS * 1000);
